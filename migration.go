@@ -11,23 +11,28 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// migrationManager handles database migrations
+// migrationManager handles database migrations.
+// It's responsible for loading migration files, tracking applied migrations,
+// and applying or rolling back migrations as needed.
 type migrationManager struct {
 	db            dbConn
 	queries       embed.FS
 	migrationsDir string
 }
 
-// migration represents a single database migration
+// migration represents a single database migration.
+// Each migration has a version number, name, up and down SQL statements,
+// and a timestamp indicating when it was applied.
 type migration struct {
-	Version   int
-	Name      string
-	UpSQL     string
-	DownSQL   string
-	AppliedAt time.Time
+	Version   int       // The migration version number (used for sorting)
+	Name      string    // A descriptive name for the migration
+	UpSQL     string    // SQL to apply the migration
+	DownSQL   string    // SQL to revert the migration
+	AppliedAt time.Time // When the migration was applied
 }
 
-// newMigrationManager creates a new migration manager
+// newMigrationManager creates a new migration manager with the given
+// database connection, embedded filesystem, and migrations directory.
 func newMigrationManager(db dbConn, queries embed.FS, migrationsDir string) *migrationManager {
 	return &migrationManager{
 		db:            db,
@@ -36,7 +41,8 @@ func newMigrationManager(db dbConn, queries embed.FS, migrationsDir string) *mig
 	}
 }
 
-// Initialize creates the migrations table if it doesn't exist
+// Initialize creates the migrations table if it doesn't exist.
+// This table is used to track which migrations have been applied.
 func (m *migrationManager) Initialize(ctx context.Context) error {
 	createTableSQL := `
 		CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -52,7 +58,10 @@ func (m *migrationManager) Initialize(ctx context.Context) error {
 	return nil
 }
 
-// LoadMigrations loads all migrations from the embedded filesystem
+// LoadMigrations loads all migrations from the embedded filesystem.
+// Migration files are expected to be named in the format "001_create_users.sql"
+// where "001" is the version number and "create_users" is the name.
+// Each file should contain up SQL followed by a "-- Down" separator and down SQL.
 func (m *migrationManager) LoadMigrations() ([]migration, error) {
 	entries, err := m.queries.ReadDir(m.migrationsDir)
 	if err != nil {
@@ -96,6 +105,7 @@ func (m *migrationManager) LoadMigrations() ([]migration, error) {
 		}
 	}
 
+	// Sort migrations by version
 	sort.Slice(migrations, func(i, j int) bool {
 		return migrations[i].Version < migrations[j].Version
 	})
@@ -103,7 +113,8 @@ func (m *migrationManager) LoadMigrations() ([]migration, error) {
 	return migrations, nil
 }
 
-// GetAppliedMigrations returns all migrations that have been applied
+// GetAppliedMigrations returns all migrations that have been applied.
+// It queries the schema_migrations table and returns a map of version to migration.
 func (m *migrationManager) GetAppliedMigrations(ctx context.Context) (map[int]migration, error) {
 	rows, err := m.db.Query(ctx, `
 		SELECT version, name, applied_at
@@ -128,7 +139,10 @@ func (m *migrationManager) GetAppliedMigrations(ctx context.Context) (map[int]mi
 	return applied, rows.Err()
 }
 
-// Migrate applies all pending migrations
+// Migrate applies all pending migrations.
+// It first loads all migrations from the filesystem, then checks which ones
+// have already been applied. It then applies any migrations that haven't been
+// applied yet, in order of version number.
 func (m *migrationManager) Migrate(ctx context.Context) error {
 	if err := m.Initialize(ctx); err != nil {
 		return err
@@ -169,7 +183,10 @@ func (m *migrationManager) Migrate(ctx context.Context) error {
 	return nil
 }
 
-// Rollback reverts the last applied migration
+// Rollback reverts the last applied migration.
+// It first determines which migration was applied last, then executes
+// the down SQL for that migration and removes the record from the
+// schema_migrations table.
 func (m *migrationManager) Rollback(ctx context.Context) error {
 	applied, err := m.GetAppliedMigrations(ctx)
 	if err != nil {
