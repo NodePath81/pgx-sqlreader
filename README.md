@@ -7,6 +7,7 @@ A PostgreSQL SQL file reader and migration manager for Go applications that use 
 - **Compile-time SQL loading**: Embeds SQL files into your Go binary during compilation
 - **Named SQL queries**: Organize and access SQL queries by name
 - **Migration management**: Handle database migrations with up and down migrations
+- **Flexible schema evolution**: Support for phased migrations and incremental schema changes
 - **JSONB support**: Helper functions for working with PostgreSQL's JSONB data type
 - **Simple API**: Easy-to-use API for executing queries and managing migrations
 - **pgx integration**: Works with pgx/v5 pools and transactions
@@ -114,6 +115,51 @@ func main() {
     }
 }
 ```
+
+### Advanced Migration: Two-Phase Approach
+
+The library supports a phased migration approach, allowing you to evolve your database schema incrementally:
+
+```go
+// Phase 1: Apply only initial schema (e.g., just the users table)
+tx, err := pool.Begin(context.Background())
+if err != nil {
+    log.Fatalf("Failed to begin transaction: %v", err)
+}
+
+// Create a connector with the transaction
+txConn := reader.ConnectTx(tx)
+
+// Initialize migrations table
+if err := txConn.InitiateMigration(context.Background()); err != nil {
+    tx.Rollback(context.Background())
+    log.Fatalf("Failed to initialize migrations table: %v", err)
+}
+
+// Manually execute and record specific migrations
+// ... apply your SQL here ...
+// ... record migration in schema_migrations table ...
+
+tx.Commit(context.Background())
+
+// Work with the initial schema
+// ...
+
+// Phase 2: Apply remaining migrations
+if err := conn.Migrate(context.Background()); err != nil {
+    log.Fatalf("Failed to apply remaining migrations: %v", err)
+}
+
+// Work with the evolved schema
+// ...
+```
+
+This approach is useful for:
+- Deploying partial features while others are still in development
+- Migrating large databases with minimal downtime
+- Testing schema changes in production-like environments
+
+See the complete example in `example/example.go` for a full demonstration.
 
 ### Working with Query Results
 
