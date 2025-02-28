@@ -633,7 +633,7 @@ func TestMigrations_WithPgxMock(t *testing.T) {
 		// Now execute the migration sequence with fresh connections each time
 		t.Run("First migration - initial schema", func(t *testing.T) {
 			// Create a connector with the first mock
-			connector := createConnectorForMigrationTest(mock, t)
+			connector := createConnectorForMigrationTest(mock)
 
 			// Perform first migration
 			err = connector.Migrate(context.Background())
@@ -644,7 +644,7 @@ func TestMigrations_WithPgxMock(t *testing.T) {
 
 		t.Run("Second migration - no changes", func(t *testing.T) {
 			// Create a connector with the second mock
-			connector := createConnectorForMigrationTest(mock2, t)
+			connector := createConnectorForMigrationTest(mock2)
 
 			// Perform second migration (no changes expected)
 			err = connector.Migrate(context.Background())
@@ -655,7 +655,7 @@ func TestMigrations_WithPgxMock(t *testing.T) {
 
 		t.Run("Third migration - still no changes", func(t *testing.T) {
 			// Create a connector with the third mock
-			connector := createConnectorForMigrationTest(mock3, t)
+			connector := createConnectorForMigrationTest(mock3)
 
 			// Perform third migration (no changes expected)
 			err = connector.Migrate(context.Background())
@@ -818,7 +818,7 @@ func (m *testMigrationManager) Migrate(ctx context.Context) error {
 }
 
 // Helper function to create a connector for migration testing
-func createConnectorForMigrationTest(mock pgxmock.PgxConnIface, t *testing.T) *testConnector {
+func createConnectorForMigrationTest(mock pgxmock.PgxConnIface) *testConnector {
 	// Create a query store
 	qs := &queryStore{
 		queries: map[string]string{},
@@ -841,10 +841,4 @@ func createConnectorForMigrationTest(mock pgxmock.PgxConnIface, t *testing.T) *t
 	return &testConnector{
 		Connector: connector,
 	}
-}
-
-// Helper function to parse time strings
-func parseTime(s string) time.Time {
-	t, _ := time.Parse(time.RFC3339, s)
-	return t
 }

@@ -64,7 +64,7 @@ func main() {
 	conn := reader.ConnectPool(pool)
 
 	// Set up metrics HTTP handler (optional - for demonstration)
-	go setupMetricsServer(reader)
+	go setupMetricsServer()
 
 	// Apply only the first migration (users table)
 	// We simulate this by programmatically applying just the first migration
@@ -153,7 +153,7 @@ func main() {
 }
 
 // setupMetricsServer sets up an HTTP server to expose Prometheus metrics
-func setupMetricsServer(reader *sqlreader.SQLReader) {
+func setupMetricsServer() {
 	// Create a new HTTP mux
 	mux := http.NewServeMux()
 

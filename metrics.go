@@ -3,6 +3,7 @@ package sqlreader
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -115,7 +116,7 @@ func (c *prometheusCollector) ObserveMigration(version int, name string, duratio
 	if !c.enabled {
 		return
 	}
-	versionStr := prometheus.BuildFQName("", "", string(version))
+	versionStr := prometheus.BuildFQName("", "", strconv.Itoa(version))
 	successStr := "false"
 	if success {
 		successStr = "true"
