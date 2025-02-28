@@ -5,6 +5,7 @@ import (
 	"embed"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"time"
 
@@ -25,6 +26,15 @@ func main() {
 	fmt.Println("SQLReader Example - Migration Demonstration")
 	fmt.Println("===========================================")
 
+	// Configure custom logging and metrics
+	// Set up a more verbose logger for development
+	config := sqlreader.DefaultSQLReaderConfig
+	config.LogLevel = sqlreader.LogLevelDebug
+
+	// Configure metrics with a custom prefix
+	config.MetricsConfig.Namespace = "example"
+	config.MetricsConfig.Subsystem = "sqlreader"
+
 	// Connect to database
 	connString := os.Getenv("DATABASE_URL")
 	if connString == "" {
@@ -44,14 +54,17 @@ func main() {
 	fmt.Println("\n📝 PHASE 1: Creating initial schema (users table only)")
 	fmt.Println("-----------------------------------------------")
 
-	// Initialize SQL reader with embedded SQL files
-	reader, err := sqlreader.New(embeddedFiles, "sql", "migrations")
+	// Initialize SQL reader with embedded SQL files and custom config
+	reader, err := sqlreader.NewWithConfig(embeddedFiles, "sql", "migrations", config)
 	if err != nil {
 		log.Fatalf("Failed to initialize SQL reader: %v", err)
 	}
 
 	// Create a connector with the database pool
 	conn := reader.ConnectPool(pool)
+
+	// Set up metrics HTTP handler (optional - for demonstration)
+	go setupMetricsServer(reader)
 
 	// Apply only the first migration (users table)
 	// We simulate this by programmatically applying just the first migration
@@ -63,14 +76,19 @@ func main() {
 	// Create a connector with the transaction
 	txConn := reader.ConnectTx(tx)
 
+	// Create a context with logger for this operation
+	ctx := context.Background()
+	logger := sqlreader.NewLogger(sqlreader.LogLevelDebug)
+	ctx = sqlreader.ContextWithLogger(ctx, logger.With("phase", "initial_schema"))
+
 	// Initialize migrations table
-	if err := txConn.InitiateMigration(context.Background()); err != nil {
+	if err := txConn.InitiateMigration(ctx); err != nil {
 		tx.Rollback(context.Background())
 		log.Fatalf("Failed to initialize migrations table: %v", err)
 	}
 
 	// Manually execute just the first migration
-	if _, err := tx.Exec(context.Background(), `
+	if _, err := tx.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS users (
 			id SERIAL PRIMARY KEY,
 			username VARCHAR(100) NOT NULL UNIQUE,
@@ -86,7 +104,7 @@ func main() {
 	}
 
 	// Record the migration
-	if _, err := tx.Exec(context.Background(), `
+	if _, err := tx.Exec(ctx, `
 		INSERT INTO schema_migrations (version, name, applied_at)
 		VALUES (1, 'create_users', $1)
 	`, time.Now().UTC()); err != nil {
@@ -95,7 +113,7 @@ func main() {
 	}
 
 	// Commit the transaction
-	if err := tx.Commit(context.Background()); err != nil {
+	if err := tx.Commit(ctx); err != nil {
 		log.Fatalf("Failed to commit transaction: %v", err)
 	}
 
@@ -109,9 +127,14 @@ func main() {
 	fmt.Println("\n📝 PHASE 2: Evolving schema (adding posts and comments tables)")
 	fmt.Println("-----------------------------------------------------------")
 
+	// Create a context with logger for this operation
+	ctx = context.Background()
+	logger = sqlreader.NewLogger(sqlreader.LogLevelDebug)
+	ctx = sqlreader.ContextWithLogger(ctx, logger.With("phase", "schema_evolution"))
+
 	// Apply remaining migrations
 	fmt.Println("Applying remaining migrations...")
-	if err := conn.Migrate(context.Background()); err != nil {
+	if err := conn.Migrate(ctx); err != nil {
 		log.Fatalf("Failed to apply remaining migrations: %v", err)
 	}
 	fmt.Println("✅ Schema evolution completed successfully")
@@ -121,13 +144,43 @@ func main() {
 	createPostsAndComments(conn)
 
 	fmt.Println("\n🎉 Example completed successfully!")
+
+	// Wait for a moment to allow metrics to be scraped if needed
+	fmt.Println("\nMetrics server running at http://localhost:2112/metrics")
+	fmt.Println("Press Ctrl+C to exit")
+
+	select {}
+}
+
+// setupMetricsServer sets up an HTTP server to expose Prometheus metrics
+func setupMetricsServer(reader *sqlreader.SQLReader) {
+	// Create a new HTTP mux
+	mux := http.NewServeMux()
+
+	// Get the metrics handler from the SQLReader instance
+	// This avoids creating duplicate metrics collectors
+	metrics := sqlreader.GetMetricsHandler()
+
+	// Register the handler
+	mux.Handle("/metrics", metrics)
+
+	// Start HTTP server
+	fmt.Println("Starting metrics server on :2112")
+	if err := http.ListenAndServe(":2112", mux); err != nil {
+		log.Printf("Metrics server stopped: %v", err)
+	}
 }
 
 // createAndQueryUsers demonstrates creating and querying users with the initial schema
 func createAndQueryUsers(conn *sqlreader.Connector) {
+	// Create a context with logger for this operation
+	ctx := context.Background()
+	logger := sqlreader.NewLogger(sqlreader.LogLevelDebug)
+	ctx = sqlreader.ContextWithLogger(ctx, logger.With("operation", "user_management"))
+
 	// Create a user
 	fmt.Println("\nCreating a user...")
-	err := conn.Exec(context.Background(), "create_user", "john.doe", "John Doe")
+	err := conn.Exec(ctx, "create_user", "john.doe", "John Doe")
 	if err != nil {
 		log.Fatalf("Failed to execute create_user query: %v", err)
 	}
@@ -136,7 +189,7 @@ func createAndQueryUsers(conn *sqlreader.Connector) {
 	var id int
 	var username, name string
 	err = conn.QueryRow(
-		context.Background(),
+		ctx,
 		"get_user_by_username",
 		func(row pgx.Row) error {
 			return row.Scan(&id, &username, &name)
@@ -150,7 +203,7 @@ func createAndQueryUsers(conn *sqlreader.Connector) {
 
 	// Update user preferences
 	jsonData := `{"preferences": {"theme": "dark", "notifications": true}}`
-	err = conn.Exec(context.Background(), "update_user_preferences", jsonData, "john.doe")
+	err = conn.Exec(ctx, "update_user_preferences", jsonData, "john.doe")
 	if err != nil {
 		log.Fatalf("Failed to update user preferences: %v", err)
 	}
@@ -160,11 +213,16 @@ func createAndQueryUsers(conn *sqlreader.Connector) {
 // createPostsAndComments demonstrates creating and querying posts and comments
 // with the evolved schema
 func createPostsAndComments(conn *sqlreader.Connector) {
+	// Create a context with logger for this operation
+	ctx := context.Background()
+	logger := sqlreader.NewLogger(sqlreader.LogLevelDebug)
+	ctx = sqlreader.ContextWithLogger(ctx, logger.With("operation", "post_management"))
+
 	var userId int
 
 	// Get the user ID
 	err := conn.QueryRow(
-		context.Background(),
+		ctx,
 		"get_user_by_username",
 		func(row pgx.Row) error {
 			return row.Scan(&userId, nil, nil) // Only need the ID
@@ -179,7 +237,7 @@ func createPostsAndComments(conn *sqlreader.Connector) {
 	fmt.Println("\nCreating a post...")
 	var postId int
 	err = conn.QueryRow(
-		context.Background(),
+		ctx,
 		"create_post",
 		func(row pgx.Row) error {
 			return row.Scan(&postId)
@@ -195,7 +253,7 @@ func createPostsAndComments(conn *sqlreader.Connector) {
 	fmt.Println("Adding a comment to the post...")
 	var commentId int
 	err = conn.QueryRow(
-		context.Background(),
+		ctx,
 		"create_comment",
 		func(row pgx.Row) error {
 			return row.Scan(&commentId)
@@ -210,7 +268,7 @@ func createPostsAndComments(conn *sqlreader.Connector) {
 	// Get post with comments count
 	var count int
 	err = conn.QueryRow(
-		context.Background(),
+		ctx,
 		"count_post_comments",
 		func(row pgx.Row) error {
 			return row.Scan(&count)
@@ -226,7 +284,7 @@ func createPostsAndComments(conn *sqlreader.Connector) {
 	var title, content, username, authorName string
 	var createdAt time.Time
 	err = conn.QueryRow(
-		context.Background(),
+		ctx,
 		"get_post_by_id",
 		func(row pgx.Row) error {
 			return row.Scan(&postId, &title, &content, &createdAt, &username, &authorName)

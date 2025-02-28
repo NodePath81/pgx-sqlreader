@@ -9,6 +9,8 @@ A PostgreSQL SQL file reader and migration manager for Go applications that use 
 - **Migration management**: Handle database migrations with up and down migrations
 - **Flexible schema evolution**: Support for phased migrations and incremental schema changes
 - **JSONB support**: Helper functions for working with PostgreSQL's JSONB data type
+- **Structured logging**: Built-in support for structured logging with slog
+- **Prometheus metrics**: Monitoring capabilities with Prometheus integration
 - **Simple API**: Easy-to-use API for executing queries and managing migrations
 - **pgx integration**: Works with pgx/v5 pools and transactions
 
@@ -160,6 +162,66 @@ This approach is useful for:
 - Testing schema changes in production-like environments
 
 See the complete example in `example/example.go` for a full demonstration.
+
+### Logging
+
+The library provides structured logging using Go's built-in `slog` package. You can configure the logging level and add contextual information to logs:
+
+```go
+// Use default configuration (Info level)
+reader, err := sqlreader.New(embeddedFiles, "sql", "migrations")
+
+// Or configure custom logging
+config := sqlreader.DefaultSQLReaderConfig
+config.LogLevel = sqlreader.LogLevelDebug  // More verbose logging
+
+reader, err := sqlreader.NewWithConfig(embeddedFiles, "sql", "migrations", config)
+
+// Create context with logger for specific operations
+ctx := context.Background()
+logger := sqlreader.NewLogger(sqlreader.LogLevelDebug)
+ctx = sqlreader.ContextWithLogger(ctx, logger.With(
+    "operation", "user_management",
+    "component", "auth",
+))
+
+// Now use this context with your queries
+err = conn.Exec(ctx, "create_user", "john", "John Doe")
+```
+
+Logs include information such as:
+- Query execution times
+- Migration operations
+- Error details
+- Custom attributes you provide in context
+
+### Metrics
+
+The library integrates with Prometheus for collecting and exposing metrics:
+
+```go
+// Configure metrics in SQLReader
+config := sqlreader.DefaultSQLReaderConfig
+config.MetricsConfig.Namespace = "myapp"
+config.MetricsConfig.Subsystem = "database"
+config.MetricsConfig.HandlerPath = "/metrics"
+
+reader, err := sqlreader.NewWithConfig(embeddedFiles, "sql", "migrations", config)
+
+// Expose metrics HTTP endpoint
+mux := http.NewServeMux()
+metrics := sqlreader.NewMetricsCollector(config.MetricsConfig)
+metrics.RegisterHTTPHandler(mux)
+http.ListenAndServe(":2112", mux)
+```
+
+Available metrics include:
+- Query execution counts and durations
+- Migration durations
+- Error counts
+- Success/failure rates
+
+You can then scrape these metrics with Prometheus and create dashboards or alerts based on your database operations.
 
 ### Working with Query Results
 
